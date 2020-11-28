@@ -45,74 +45,241 @@
     <div id="caption">
         US COVID-19 Hospitalized to Death Ratio.
 		</div>
-		<div id="tooltip"></div>
-    <div>
-        <svg id="canvas" viewbox="0 0 1000 800">
-        </svg>
-    </div>
+        <div>
+            <svg id="canvas" width ="100vw" height="100vh" viewbox="0 0 1000 800">
+            </svg>
+        </div>
+        <div id="tooltip">
+            <svg id="svg_tooltop" width="100%" height="100%" viewBox="0 0 200 100">
+            </svg>
+        </div>
     <script>
         let svg = d3.select('svg');
-        let covid19 = 'COVID-19/csse_covid_19_data/csse_covid_19_daily_reports_us/04-12-2020.csv';
+        // let covid19 = 'COVID-19/csse_covid_19_data/csse_covid_19_daily_reports_us/04-12-2020.csv';
         let topoJSON = 'data/cb_2018_us_state_20m_topo.json';
-        let projection = d3.geoAlbersUsa()
-                                .scale(1300).translate([500,400])
-        Promise.all(
-            [
-                d3.json(topoJSON),
-                d3.csv(covid19)],d3.autoType()).then(main)
+    Promise.all(
+        [
+            d3.json(topoJSON),
+            d3.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-states.csv")]
+            ,d3.autoType()).then(main)
 
-        function main(data){
-						//console.log(data);
-            let topoJson = topojson.feature(data[0],data[0].objects.cb_2018_us_state_20m).features;
-            let topo_generator = d3.geoPath().projection(projection);
-            //console.log(topoJson);
-						let covid_data = d3.group(data[1],function(d){return d.Province_State;});
-            let hosp_death_extent  = d3.extent(data[1],function (d){
-                return (parseFloat(d.Deaths)/parseFloat(d.People_Hospitalized))
-            })
-            hosp_death_extent[0]=1
-						//console.log(covid_data);
-            let colorScale = d3.scaleLog()
-            .domain(hosp_death_extent)
-            .range(["white","steelblue"])
-            .interpolate(d3.interpolateCubehelix.gamma(1))
-            let mapCanvas = svg.append('g');
-            mapCanvas.selectAll('path')
+    function main(data){
+        let covid_data = d3.group(data[1],function(d){return d.fips;}); // groups of fips
+        // example covid_data.get("35"); // this will return washington's all covid-19 data
+        // (covid_data.get('35'));
+        let projection = d3.geoAlbersUsa().scale(1300).translate([500,400])
+        let geo_generator = d3.geoPath().projection(projection);
+        let topoJson = topojson.feature(data[0],data[0].objects.cb_2018_us_state_20m).features;
+        let topo_generator = d3.geoPath().projection(projection);
+        let hosp_cases_extent  = d3.extent(data[1],function (d){
+            return (parseFloat(d.cases))
+        })
+        let colorScale = d3.scaleLog()
+        .domain(hosp_cases_extent)
+        .range(["white","steelblue"])
+        .interpolate(d3.interpolateCubehelix.gamma(1))
+
+        let mapCanvas = svg.append('g');
+        mapCanvas.selectAll('path')
             .data(topoJson)
             .enter()
             .append('path')
             .attr("class","path_geo")
             .attr("d",topo_generator)
             .attr("fill","white")
-            .on("mousemove",function(mouseData,d){
-                d3.select("#tooltip")
-                .style("opacity",.8)
-                .style("left",(mouseData.clientX+10).toString()+"px")
-                .style("top",(mouseData.clientY+10).toString()+"px")
-                .html("<div>State Data On</div>" +
-                "<div class='tooltipData'>State: "+covid_data.get(d.properties.NAME)[0].Province_State+"</div>" +
-                "<div class='tooltipData' style='color:blue'>People Tested: "+covid_data.get(d.properties.NAME)[0].People_Hospitalized.toString()+"</div>" +
-                "<div class='tooltipData' style='color:red'>People Hospitalized: "+covid_data.get(d.properties.NAME)[0].Deaths.toString()+"</div>" +
-                "<div class='tooltipData' style='color:purple'>Test to Hospital Ratio: "+(parseInt(covid_data.get(d.properties.NAME)[0].Deaths)/parseInt(covid_data.get(d.properties.NAME)[0].People_Hospitalized)).toString()+"</div>")
+            .on("mouseover",function(mouseData,d){
+                Make_line_chart(d.properties.STATEFP)
+                //tooltip_html(d.properties.STATEFP)
+                d3.select('#tooltip')
+                    .style("opacity",.8)
+                    .style("left",(mouseData.clientX+10).toString()+"px")
+                    .style("top",(mouseData.clientY+10).toString()+"px")
             })
             .transition()
             .delay(function (d,i){return i*2})
             .duration(1000)
             .attr("fill",function (d){
             try{
-                console.log(covid_data.get("Vermont")[0].Deaths)
-                return colorScale(parseFloat(covid_data.get(d.properties.NAME)[0].Deaths)/parseFloat(covid_data.get(d.properties.NAME)[0].People_Hospitalized))
+                // console.log(parseInt(covid_data.get(d.properties.STATEFP)[0].cases))
+                let caseCheck = covid_data.get(d.properties.STATEFP)
+                return colorScale(parseInt(caseCheck[caseCheck.length-1].cases))
             }
             catch (error){
-								console.log(error);
                 return "white"
             }
             })
-        svg.call(d3.zoom()
-            .extent([[0,0],[1000,800]])
-            .scaleExtent([1,8])
-            .on("zoom",zoomed))
+            
+        
+
+    function Make_line_chart(fips,svg_element_name="svg_tooltop")
+        {
+            let data_for_the_hovored_county = covid_data.get(fips);
+            //console.log(fips,data_for_the_hovored_county)
+            // x and y for the line chart for number of the cases (cumulative)
+            let x_y  = d3.map(data_for_the_hovored_county,function (d) {
+                return {"x" : d3.timeParse("%Y-%m-%d")(d.date), // cast to date format
+                        "y": + +d.cases // cast to numeric
+                }
+            });
+
+            console.log(x_y)
+
+            // xscale and yscale
+            let xscale = d3.scaleTime().domain(d3.extent(x_y,function (d) {
+                return d.x
+            }))
+                .range([0, 900])
+            let yscale = d3.scaleLinear().domain(d3.extent(x_y,function (d) {
+                return d.y
+            }))
+                .range([700,0])
+            // line generator
+            let line_generator = d3.line()
+                .x(function (d) {
+                    return xscale(d.x)})
+                .y(function (d) { return yscale(d.y)})
+
+            d3.select('.Linefigure').remove();
+            let lineChart_svg = d3.select(`#${svg_element_name}`)
+                .append("g")
+                .attr("class","Linefigure")
+                .attr("transform","translate(50 50)")
+
+            lineChart_svg.selectAll('g')
+                .data([x_y])
+                .enter()
+                .append("path")
+                .attr("d",line_generator)
+                .attr("stroke","black")
+                .attr("stroke-width","1px")
+                .attr("fill","none")
+            lineChart_svg.append("g").attr("class","axis")
+                .call(d3.axisLeft(yscale));
+            lineChart_svg.append("g").attr("class","axis").attr("transform","translate(0,700)")
+                .call(d3.axisBottom(xscale));
+            lineChart_svg.selectAll('g').append('path').attr("d",line_generator(x_y)).attr("class","cases")
         }
+        function tooltip_html(names){
+            let margin={x:30,y:0}
+            let plot_height = 80
+            let history_cases = [covid_data.get(names).reduce(function(prev,cur) { return prev + +cur.cases ;}, 0)]
+            console.log('hcases',history_cases)
+            let history_deaths = [covid_data.get(names).reduce(function(prev, cur) { return prev + +cur.deaths;}, 0)]
+            console.log('hdeaths',history_deaths)
+            let extent = d3.extent([history_cases,history_deaths].flat(),function (d){ return d})
+            console.log('extent',extent);
+            let xScale=d3.scaleLinear().domain([0,history_cases.length]).range([0,150])
+            let yScale=d3.scaleLinear().domain(extent).range([plot_height,0])
+            let x_axis_values = [3,4,5,6,7,8,9,10,11]
+            let lineGenerator = d3.line()
+                    .x(function(d, i) {
+                        console.log('i',x_axis_values[i])
+                        return xScale(x_axis_values[i]);
+                    })
+                    .y(function(d) {
+                        return yScale(d);
+                    });
+            let casesLine = lineGenerator(history_cases);
+            let deathsLine = lineGenerator(history_deaths);
+            console.log('scale: ', casesLine)
+            let svg_tooltip = d3.select("#svg_tooltop")
+                svg_tooltip.selectAll('g').remove()
+                svg_tooltip.append('g').attr("transform",`translate(${margin.x},${margin.y})`)
+                    .append("text")
+                    .attr("x",20)
+                    .attr('y',1)
+                    .text(names)
+                    .attr("class","county_name")
+
+                svg_tooltip.selectAll('g').append('path').attr("d",casesLine).attr("class","cases")
+                svg_tooltip.selectAll('g').append('path').attr("d",deathsLine).attr("class","deaths")
+
+                // formatting numbers in y axis to look human readable:
+                let formatValue = d3.format(".2s");
+                // x and y Axis function
+                let x_axis = d3.axisBottom(xScale).ticks(4)
+                let y_axis = d3.axisLeft(yScale).ticks(4).tickFormat(function(d) { return formatValue(d)});
+                //X Axis
+                svg_tooltip.append("g").attr("class","axis")
+                    .attr("transform", `translate(${margin.x},${plot_height})`)
+                    .call(x_axis)
+                // Y Axis
+                svg_tooltip.append("g").attr("class","axis")
+                    .attr("transform", `translate(${margin.x},${0})`)
+                    .call(y_axis)
+
+
+            }
+        svg.call(d3.zoom()
+        .extent([[0,0],[1000,800]])
+        .scaleExtent([1,8])
+        .on("zoom",zoomed))
+
+        function zoomed({transform}){
+            mapCanvas.attr("transform",transform)
+        }
+            
+    }
+
+        // Promise.all(
+        //     [
+        //         d3.json(topoJSON),
+        //         d3.csv(covid19)],d3.autoType()).then(main)
+
+        // function main(data){
+		// 				//console.log(data);
+        //     let projection = d3.geoAlbersUsa().scale(1300).translate([500,400])​
+
+        //     let topoJson = topojson.feature(data[0],data[0].objects.cb_2018_us_state_20m).features;
+        //     let topo_generator = d3.geoPath().projection(projection);
+        //     //console.log(topoJson);
+		// 				let covid_data = d3.group(data[1],function(d){return d.Province_State;});
+        //     let hosp_cases_extent  = d3.extent(data[1],function (d){
+        //         return (parseFloat(d.Cases))
+        //     })
+        //     hosp_cases_extent[0]=1
+		// 				console.log(covid_data);
+        //     let colorScale = d3.scaleLog()
+        //     .domain(hosp_cases_extent)
+        //     .range(["white","steelblue"])
+        //     .interpolate(d3.interpolateCubehelix.gamma(1))
+        //     let mapCanvas = svg.append('g');
+        //     mapCanvas.selectAll('path')
+        //     .data(topoJson)
+        //     .enter()
+        //     .append('path')
+        //     .attr("class","path_geo")
+        //     .attr("d",topo_generator)
+        //     .attr("fill","white")
+        //     .on("mousemove",function(mouseData,d){
+        //         d3.select("#tooltip")
+        //         .style("opacity",.8)
+        //         .style("left",(mouseData.clientX+10).toString()+"px")
+        //         .style("top",(mouseData.clientY+10).toString()+"px")
+        //         .html("<div>State Data On</div>" +
+        //         "<div class='tooltipData'>State: "+covid_data.get(d.properties.NAME)[0].Province_State+"</div>" +
+        //         "<div class='tooltipData' style='color:blue'>People Tested: "+covid_data.get(d.properties.NAME)[0].People_Hospitalized.toString()+"</div>" +
+        //         "<div class='tooltipData' style='color:red'>People Hospitalized: "+covid_data.get(d.properties.NAME)[0].Deaths.toString()+"</div>" +
+        //         "<div class='tooltipData' style='color:purple'>Test to Hospital Ratio: "+(parseInt(covid_data.get(d.properties.NAME)[0].Deaths)/parseInt(covid_data.get(d.properties.NAME)[0].People_Hospitalized)).toString()+"</div>")
+        //     })
+        //     .transition()
+        //     .delay(function (d,i){return i*2})
+        //     .duration(1000)
+        //     .attr("fill",function (d){
+        //     try{
+        //         console.log(covid_data.get("Vermont")[0].Deaths)
+        //         return colorScale(parseFloat(covid_data.get(d.properties.NAME)[0].Cases))
+        //     }
+        //     catch (error){
+		// 						console.log(error);
+        //         return "white"
+        //     }
+        //     })
+        // svg.call(d3.zoom()
+        //     .extent([[0,0],[1000,800]])
+        //     .scaleExtent([1,8])
+        //     .on("zoom",zoomed))
+        // }
         function zoomed({transform}){
             mapCanvas.attr("transform",transform)
         }
